@@ -88,14 +88,44 @@ Press ✕ to dismiss. Never press the "Update" / confirm button. If you're ever
 caught on a screen that won't let you back out, the physical **power button
 held for 10 seconds** always wins.
 
+## Downgrading (e.g. 14.00 → 13.60)
+
+The pin keeps you from *needing* this, but if you ended up on an
+unsupported version, you can go back — while Sony's keyset 0 is active
+(as of Oct 2026, no rollback lock has shipped). Any firmware change is an
+official PUP install over USB; it wipes the jailbreak, not your games or
+saves.
+
+```bash
+# Download the firmware you want (official Sony CDN, region varies)
+python3 ps5-fw-downgrade.py 13.60.007 --region europe
+
+# Explicit mirror URL if your region 404s (e.g. PSXHAX)
+python3 ps5-fw-downgrade.py --url https://mirror.example/PS5UPDATE.PUP
+
+# Check a PUP you already have
+python3 ps5-fw-downgrade.py --verify /path/to/PS5UPDATE.PUP
+```
+
+Then the console does the rest:
+
+1. USB stick (exFAT or FAT32), file at **`PS5/UPDATE/PS5UPDATE.PUP`** on the
+   stick root
+2. PS5: Settings → System → System Software and Updates →
+   **Install Update from USB Drive**
+3. After reboot, **re-jailbreak** (run your exploit, reload payloads).
+   ShadowMount-style tools re-mount game dumps automatically
+
+An "older than current system software" warning on the install screen is
+normal for a downgrade — proceed anyway.
+
 ## What this is NOT
 
 - Not a brick-proof against *everything*. A power cut mid-real-install is
   still a power cut mid-real-install. This prevents the console from
   *reaching* that point.
-- Not a downgrade tool. It pins you to what you're **already** on. To go
-  *back* you need a different mechanism.
-- Doesn't touch your games, saves, or the jailbreak itself.
+- The pin doesn't touch your games, saves, or the jailbreak itself.
+  (Downgrading wipes the jailbreak but keeps games and saves.)
 
 ## Files
 
@@ -103,3 +133,4 @@ held for 10 seconds** always wins.
 |---|---|
 | `ps5-fw-pin.py` | Pin: `--floor` (safe) or `--full` (hosts), `--dry-run`, `--strict`, fw gate |
 | `ps5-fw-unpin.py` | Restore: put `/etc/hosts` back, remove tripwire PUP |
+| `ps5-fw-downgrade.py` | Download + verify a PUP, stage USB install, print re-jailbreak checklist |
