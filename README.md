@@ -1,4 +1,4 @@
-# ps5-fw-pin
+# ps5-firmware-pin
 
 Keep a jailbroken PS5 on the firmware you want. No more "the PS5 needs an
 update before it can be turned on" at the worst possible moment.
