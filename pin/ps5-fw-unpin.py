@@ -10,6 +10,8 @@ Usage:
   python3 pin/ps5-fw-unpin.py --host <PS5 IP> [--port 2323] [--dry-run]
 """
 
+from __future__ import annotations
+
 import argparse
 import sys
 
@@ -19,7 +21,8 @@ BACKUP_SUFFIX = ".fwpin.bak"
 HOSTS_FILES = ("/dev/nfs/etc/hosts", "/etc/hosts")
 
 
-def restore_hosts(shell, dry_run):
+def restore_hosts(shell: PS5Shell, dry_run: bool) -> bool:
+    """Put the backed-up hosts file back. Returns False if the restore didn't stick."""
     for hosts_path in HOSTS_FILES:
         backup_path = hosts_path + BACKUP_SUFFIX
         if not shell.exists(backup_path):
@@ -27,15 +30,19 @@ def restore_hosts(shell, dry_run):
         print(f"backup found: {backup_path}")
         if dry_run:
             print(f"[dry-run] would restore it over {hosts_path}")
-        else:
-            shell.run(f"cp {backup_path} {hosts_path}")
-            shell.run(f"rm {backup_path}")
-            print(f"restored {hosts_path} from backup")
-        return
+            return True
+        shell.run(f"cp {backup_path} {hosts_path}")
+        if shell.run(f"cat {hosts_path}", wait=4) != shell.run(f"cat {backup_path}", wait=4):
+            print(f"restoring {hosts_path} failed (read-only mount?). Backup kept at {backup_path}.")
+            return False
+        shell.run(f"rm {backup_path}")
+        print(f"restored {hosts_path} from backup")
+        return True
     print("no hosts backup found: nothing was pinned with --full, or it was already undone.")
+    return True
 
 
-def main():
+def main() -> int:
     parser = argparse.ArgumentParser(description="Undo a PS5 firmware pin.")
     parser.add_argument("--host", required=True,
                         help="PS5 IP address (Settings > Network > Connection Status)")
@@ -52,7 +59,9 @@ def main():
         return 2
 
     with shell:
-        restore_hosts(shell, args.dry_run)
+        restored = restore_hosts(shell, args.dry_run)
+    if not restored:
+        return 1
 
     print()
     print("unpinned. To turn automatic update downloads back on:")

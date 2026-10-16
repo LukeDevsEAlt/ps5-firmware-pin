@@ -18,6 +18,8 @@ Usage:
   python3 pin/ps5-fw-pin.py --host <PS5 IP> [--port 2323] [--floor | --full] [--dry-run]
 """
 
+from __future__ import annotations
+
 import argparse
 import re
 import sys
@@ -41,7 +43,7 @@ VERSION_FILES = (
 HOSTS_FILES = ("/dev/nfs/etc/hosts", "/etc/hosts")
 
 
-def detect_firmware(shell):
+def detect_firmware(shell: PS5Shell) -> str | None:
     """Return the firmware version string, or None if no known file has it."""
     for path in VERSION_FILES:
         match = re.search(r"\d+\.\d+(?:\.\d+)?", shell.run(f"cat {path}", wait=2.5))
@@ -50,11 +52,12 @@ def detect_firmware(shell):
     return None
 
 
-def pending_update_exists(shell):
-    return "PS5UPDATE.PUP" in shell.run("ls -la /update", wait=4)
+def pending_update_exists(shell: PS5Shell) -> bool:
+    listing = shell.run("ls -la /update", wait=4)
+    return any(line.split()[-1] == "PS5UPDATE.PUP" for line in listing.splitlines() if line.split())
 
 
-def remove_pending_update(shell, dry_run):
+def remove_pending_update(shell: PS5Shell, dry_run: bool) -> None:
     if not pending_update_exists(shell):
         print("  no pending PS5UPDATE.PUP")
         return
@@ -66,25 +69,36 @@ def remove_pending_update(shell, dry_run):
     print("  deleted.")
 
 
-def pin_hosts(shell, hosts_path, dry_run):
+def pin_hosts(shell: PS5Shell, hosts_path: str, dry_run: bool) -> bool:
+    """Point the update servers at 127.0.0.1. Returns False if the change didn't stick."""
     current = shell.run(f"cat {hosts_path}", wait=4)
-    if any(hostname in current for hostname in UPDATE_HOSTS):
+    if all(hostname in current for hostname in UPDATE_HOSTS):
         print(f"  {hosts_path} already pinned")
-        return
+        return True
     backup_path = hosts_path + BACKUP_SUFFIX
     if dry_run:
         print(f"  [dry-run] would back up {hosts_path} -> {backup_path}")
         for hostname in UPDATE_HOSTS:
             print(f"  [dry-run] would add: 127.0.0.1   {hostname}")
-        return
-    shell.run(f"cp {hosts_path} {backup_path}")
-    for hostname in UPDATE_HOSTS:
-        shell.run(f'printf "127.0.0.1   {hostname}\\n" >> {hosts_path}')
+        return True
+    if not shell.exists(backup_path):
+        shell.run(f"cp {hosts_path} {backup_path}")
+        if not shell.exists(backup_path):
+            print(f"  could not create {backup_path}. Leaving {hosts_path} untouched.")
+            return False
     print(f"  backed up to {backup_path}")
+    missing = [hostname for hostname in UPDATE_HOSTS if hostname not in current]
+    entries = "".join(f"127.0.0.1   {hostname}\\n" for hostname in missing)
+    shell.run(f'printf "\\n{entries}" >> {hosts_path}')
+    pinned = shell.run(f"cat {hosts_path}", wait=4)
+    if not all(hostname in pinned for hostname in UPDATE_HOSTS):
+        print(f"  writing {hosts_path} failed (read-only mount?). The update servers are NOT blocked.")
+        return False
     print("  pinned update hosts")
+    return True
 
 
-def run_pin(shell, args):
+def run_pin(shell: PS5Shell, args: argparse.Namespace) -> int:
     firmware = detect_firmware(shell)
     if firmware is None:
         print("firmware: unknown. Check it on the console: Settings > System > System Software.")
@@ -113,11 +127,13 @@ def run_pin(shell, args):
             print("  The floor steps above already ran, so the console is still protected.")
             return 1
         print(f"  hosts file: {hosts_path}")
-        pin_hosts(shell, hosts_path, args.dry_run)
+        if not pin_hosts(shell, hosts_path, args.dry_run):
+            print("  The floor steps above already ran, so the console is still protected.")
+            return 1
     return 0
 
 
-def main():
+def main() -> int:
     parser = argparse.ArgumentParser(description="Pin a jailbroken PS5 to its current firmware.")
     parser.add_argument("--host", required=True,
                         help="PS5 IP address (Settings > Network > Connection Status)")

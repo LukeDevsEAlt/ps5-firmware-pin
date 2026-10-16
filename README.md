@@ -31,6 +31,7 @@ You need:
 - **The PS5 and the computer on the same network.**
 - **Your PS5's IP address.** On the console: Settings > Network > Connection
   Status > View Connection Status > IPv4 Address. It looks like `192.168.1.42`.
+  Every command below uses `192.168.1.42` as an example: replace it with yours.
 
 The pin scripts also need the console **jailbroken right now, with the shsrv
 payload loaded**. shsrv is the shell the scripts talk to, on port 2323. The
@@ -76,10 +77,11 @@ If the console is on a firmware the jailbreak doesn't support, you can install
 an older one from a USB stick:
 
 ```bash
-python3 downgrade/ps5-fw-downgrade.py 13.60.007 --region europe
+python3 downgrade/ps5-fw-downgrade.py --url <link to PS5UPDATE.PUP>
 ```
 
-This downloads the official firmware file (2 to 7 GB) and checks it's real.
+Sony only links the latest firmware, so the older file comes from a PS5
+homebrew mirror. The script downloads it (about 1 GB) and checks it's real.
 Then copy it to a USB stick and install it from the console. The full
 walkthrough is in [downgrade/README.md](downgrade/README.md). Your games and
 saves stay; the jailbreak has to be run again afterwards.
