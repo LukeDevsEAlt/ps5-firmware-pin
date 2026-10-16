@@ -1,5 +1,7 @@
 """Minimal client for the PS5 shsrv telnet shell (port 2323)."""
 
+from __future__ import annotations
+
 import socket
 import time
 
@@ -13,18 +15,18 @@ class PS5Shell:
     command reads until the socket goes quiet or `wait` seconds pass.
     """
 
-    def __init__(self, host, port, read_timeout=3.0):
+    def __init__(self, host: str, port: int, read_timeout: float = 3.0) -> None:
         self.sock = socket.create_connection((host, port), timeout=5)
         self.sock.settimeout(read_timeout)
         self._read(2)
 
-    def __enter__(self):
+    def __enter__(self) -> PS5Shell:
         return self
 
-    def __exit__(self, *exc_info):
+    def __exit__(self, *exc_info: object) -> None:
         self.close()
 
-    def _read(self, seconds):
+    def _read(self, seconds: float) -> bytes:
         deadline = time.time() + seconds
         received = b""
         while time.time() < deadline:
@@ -37,18 +39,18 @@ class PS5Shell:
             received += chunk
         return received
 
-    def run(self, command, wait=3.0):
+    def run(self, command: str, wait: float = 3.0) -> str:
         self.sock.sendall(command.encode() + b"\n")
         output = self._read(wait).decode(errors="replace")
         lines = [line for line in output.splitlines()
                  if line.strip() and not line.strip().startswith("/$")]
         return "\n".join(lines).strip()
 
-    def exists(self, path):
-        output = self.run(f"ls {path}").lower()
-        return "no such file" not in output and "cannot access" not in output
+    def exists(self, path: str) -> bool:
+        """True only if `ls` printed the path back, so a dropped stderr can't read as success."""
+        return any(line.strip() == path for line in self.run(f"ls {path}").splitlines())
 
-    def close(self):
+    def close(self) -> None:
         try:
             self.sock.close()
         except OSError:

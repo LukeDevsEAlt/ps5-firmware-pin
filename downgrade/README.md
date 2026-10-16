@@ -18,14 +18,13 @@ What changing firmware does:
 
 ## Step 1: Get the firmware file
 
-The firmware comes as one file named `PS5UPDATE.PUP` (a "PUP"). Run from the
-repo root:
+The firmware comes as one file named `PS5UPDATE.PUP` (a "PUP"). Sony's site
+only offers the latest version, so get the one you want from a PS5 homebrew
+mirror (e.g. PSXHAX) and prefer one that publishes an MD5 checksum. Run from
+the repo root:
 
 ```bash
-# From Sony's servers. If your region gives a 404, try us or asia.
-python3 downgrade/ps5-fw-downgrade.py 13.60.007 --region europe
-
-# From any mirror (e.g. PSXHAX)
+# Download from a mirror link
 python3 downgrade/ps5-fw-downgrade.py --url https://mirror.example/PS5UPDATE.PUP
 
 # Check a PUP you already have
@@ -35,9 +34,11 @@ python3 downgrade/ps5-fw-downgrade.py --verify /path/to/PS5UPDATE.PUP
 python3 downgrade/ps5-fw-downgrade.py --verify /path/to/PS5UPDATE.PUP --md5
 ```
 
-A real PUP is **2 to 7 GB**. If you get a file of a few KB or MB, it's an error
-page, not firmware, and `--verify` says so. The download saves to
-`PS5UPDATE.PUP` in the current folder (change it with `-o`).
+A real PUP is **about 1 GB**. If you get a file of a few KB or MB, it's an
+error page, not firmware, and `--verify` says so. The size check can't tell
+which version a file is, so compare the MD5 with the mirror's checksum.
+The download saves to `PS5UPDATE.PUP` in the current folder (change it
+with `-o`).
 
 ## Step 2: Prepare the USB stick
 
@@ -75,7 +76,7 @@ The firmware change removed the jailbreak. After the reboot:
 4. Pin the firmware so this doesn't happen again:
 
    ```bash
-   python3 pin/ps5-fw-pin.py --host 192.168.1.42
+   python3 pin/ps5-fw-pin.py --host 192.168.1.42   # your PS5's IP
    ```
 
    and set **Automatic Downloads** to **Off** in Settings. See
