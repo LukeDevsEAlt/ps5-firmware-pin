@@ -100,3 +100,7 @@ saves stay; the jailbreak has to be run again afterwards.
 
 Use at your own risk. Modifying console firmware and running homebrew may void
 your warranty and break Sony's terms of service. Not affiliated with Sony.
+
+## License
+
+[MIT](LICENSE)
