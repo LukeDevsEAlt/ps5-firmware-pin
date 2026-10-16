@@ -1,43 +1,28 @@
 #!/usr/bin/env python3
 """
-ps5-fw-pin — keep a jailbroken PS5 on its current firmware.
+ps5-fw-pin: keep a jailbroken PS5 on its current firmware.
 
-Prevents the console from downloading or installing a newer firmware
-(e.g. staying on 13.60.007 while 14.x is out and Relapse doesn't support it).
+Stops the console from staging a newer firmware (for example staying on
+13.60.007 while 14.x is out and Relapse doesn't support it).
 
-Two modes:
+  --floor  (default, always works)
+    Reads the firmware version and stops if it is 14.x, deletes any pending
+    /update/PS5UPDATE.PUP, then checks /update is clean. Pair it with
+    Settings > System > System Software and Updates > Automatic Downloads > Off.
 
-  --floor  (safe, always works)
-    - Verifies the jailbroken shell is reachable
-    - Checks the firmware version (refuses to continue on unexpected major)
-    - Removes any pending PS5UPDATE.PUP from /update
-    - Verifies /update is clean
-    Pair with the console setting:
-      Settings > System > System Software and Updates >
-      Automatic Downloads > System Software and Apps > OFF
-    That alone means: no background download, nothing staged to install,
-    and the only remaining prompt is a button you press X on.
-
-  --full   (strong, needs a kfs mount)
-    - Does everything --floor does, plus
-    - Pins the real /etc/hosts (via /dev/nfs, created by the kstuff app or
-      modern etaHEN kfs) so update.playstation.com resolves to 127.0.0.1.
-      The update checker then can't even see that an update exists.
-    - Backs up the original hosts first.
-    Use --full only when `ls /dev/nfs` works in your jailbreak shell.
+  --full   (needs /dev/nfs from the kstuff app or etaHEN kfs)
+    Everything --floor does, plus backs up the real /etc/hosts and points the
+    update servers at 127.0.0.1, so the console never sees an update exists.
 
 Usage:
-  python3 ps5-fw-pin.py [--host 192.168.1.78] [--port 2323]
-                        [--floor | --full] [--dry-run] [--strict]
-
---strict (full mode): keeps a corrupted PUP on disk so any attempted
-14.x install fails signature verification and reboots to current firmware.
+  python3 pin/ps5-fw-pin.py --host <PS5 IP> [--port 2323] [--floor | --full] [--dry-run]
 """
 
 import argparse
 import re
-import socket
 import sys
+
+from ps5shell import PS5Shell
 
 UPDATE_HOSTS = [
     "update.playstation.com",
@@ -45,135 +30,105 @@ UPDATE_HOSTS = [
 ]
 PUP_PATH = "/update/PS5UPDATE.PUP"
 BACKUP_SUFFIX = ".fwpin.bak"
-
-
-class PS5Shell:
-    """Minimal telnet-style client for the PS5 shsrv shell (port 2323).
-
-    The shell is a busybox sh in a chroot whose root is the real system
-    root. Quirks handled: no `2>&1`, no `find`, no `head`, line endings
-    are \r\n, prompt is '/$ '.
-    """
-
-    def __init__(self, host, port, timeout=3.0):
-        self.sock = socket.create_connection((host, port), timeout=5)
-        self.sock.settimeout(timeout)
-
-    def _drain(self, seconds):
-        end = __import__("time").time() + seconds
-        buf = b""
-        while __import__("time").time() < end:
-            try:
-                d = self.sock.recv(4096)
-                if not d:
-                    break
-                buf += d
-            except socket.timeout:
-                break
-        return buf
-
-    def cmd(self, command, wait=3.0):
-        self.sock.sendall(command.encode() + b"\n")
-        out = self._drain(wait).decode(errors="replace")
-        lines = [l for l in out.splitlines()
-                 if l.strip() and l.strip() != "/$"
-                 and not l.strip().startswith("/$")]
-        return "\n".join(lines).strip()
-
-    def close(self):
-        try:
-            self.sock.close()
-        except OSError:
-            pass
+BLOCKED_MAJOR_VERSIONS = {"14"}
+VERSION_FILES = (
+    "/system_ex/version.txt",
+    "/system/version.txt",
+    "/dev/nfs/system/version.txt",
+    "/etc/version.txt",
+    "/system_data/settings/version.txt",
+)
+HOSTS_FILES = ("/dev/nfs/etc/hosts", "/etc/hosts")
 
 
 def detect_firmware(shell):
-    """Best-effort firmware read from known locations. May return None.
-
-    The shell view has no /etc, so we probe the spots that do exist on
-    13.x. None is acceptable — the caller treats it as 'verify manually'.
-    """
-    for path in ("/system_ex/version.txt", "/system/version.txt",
-                 "/dev/nfs/system/version.txt", "/etc/version.txt",
-                 "/system_data/settings/version.txt"):
-        try:
-            out = shell.cmd(f"cat {path}", wait=2.5)
-        except (OSError, socket.timeout):
-            continue
-        m = re.search(r"(\d+)\.(\d+)(?:\.(\d+))?", out)
-        if m:
-            return m.group(0)
+    """Return the firmware version string, or None if no known file has it."""
+    for path in VERSION_FILES:
+        match = re.search(r"\d+\.\d+(?:\.\d+)?", shell.run(f"cat {path}", wait=2.5))
+        if match:
+            return match.group(0)
     return None
 
 
-def update_dir_listing(shell):
-    return shell.cmd("ls -la /update", wait=4)
+def pending_update_exists(shell):
+    return "PS5UPDATE.PUP" in shell.run("ls -la /update", wait=4)
 
 
-def remove_pup(shell, dry_run):
-    out = update_dir_listing(shell)
-    if "PS5UPDATE.PUP" in out:
-        print(f"  found pending update: {PUP_PATH}")
-        if dry_run:
-            print("  [dry-run] would delete it")
-        else:
-            shell.cmd(f"rm {PUP_PATH}", wait=4)
-            print("  deleted.")
-        return True
-    print("  no pending PS5UPDATE.PUP")
-    return False
-
-
-def verify_update_clean(shell):
-    out = update_dir_listing(shell)
-    clean = "PS5UPDATE.PUP" not in out
-    print(f"  /update clean: {clean}")
-    return clean
-
-
-def find_hosts(shell):
-    for path in ("/dev/nfs/etc/hosts", "/etc/hosts"):
-        out = shell.cmd(f"ls {path}", wait=3)
-        if "No such file" not in out and "cannot access" not in out.lower():
-            return path
-    return None
-
-
-def pin_hosts(shell, hosts, dry_run):
-    current = shell.cmd(f"cat {hosts}", wait=4)
-    already = any(h in current for h in UPDATE_HOSTS)
-    if already:
-        print("  /etc/hosts already pinned")
-        return True
+def remove_pending_update(shell, dry_run):
+    if not pending_update_exists(shell):
+        print("  no pending PS5UPDATE.PUP")
+        return
+    print(f"  found pending update: {PUP_PATH}")
     if dry_run:
-        print(f"  [dry-run] would backup {hosts} -> {hosts}{BACKUP_SUFFIX}")
-        for h in UPDATE_HOSTS:
-            print(f"  [dry-run]   127.0.0.1   {h}")
-        return True
-    shell.cmd(f"cp {hosts} {hosts}{BACKUP_SUFFIX}", wait=3)
-    for h in UPDATE_HOSTS:
-        shell.cmd(f'printf "127.0.0.1   {h}\\n" >> {hosts}', wait=3)
-    print(f"  backed up to {hosts}{BACKUP_SUFFIX}")
+        print("  [dry-run] would delete it")
+        return
+    shell.run(f"rm {PUP_PATH}", wait=4)
+    print("  deleted.")
+
+
+def pin_hosts(shell, hosts_path, dry_run):
+    current = shell.run(f"cat {hosts_path}", wait=4)
+    if any(hostname in current for hostname in UPDATE_HOSTS):
+        print(f"  {hosts_path} already pinned")
+        return
+    backup_path = hosts_path + BACKUP_SUFFIX
+    if dry_run:
+        print(f"  [dry-run] would back up {hosts_path} -> {backup_path}")
+        for hostname in UPDATE_HOSTS:
+            print(f"  [dry-run] would add: 127.0.0.1   {hostname}")
+        return
+    shell.run(f"cp {hosts_path} {backup_path}")
+    for hostname in UPDATE_HOSTS:
+        shell.run(f'printf "127.0.0.1   {hostname}\\n" >> {hosts_path}')
+    print(f"  backed up to {backup_path}")
     print("  pinned update hosts")
-    return True
+
+
+def run_pin(shell, args):
+    firmware = detect_firmware(shell)
+    if firmware is None:
+        print("firmware: unknown. Check it on the console: Settings > System > System Software.")
+    else:
+        print(f"firmware: {firmware}")
+        if firmware.split(".")[0] in BLOCKED_MAJOR_VERSIONS:
+            print("STOP: this console is on 14.x, which the jailbreak may not support.")
+            print("Check your exploit's supported firmware list, or see downgrade/README.md.")
+            return 1
+
+    print("== floor ==")
+    remove_pending_update(shell, args.dry_run)
+    if not args.dry_run:
+        clean = not pending_update_exists(shell)
+        print(f"  /update clean: {clean}")
+        if not clean:
+            print("  could not delete the pending update. Delete /update/PS5UPDATE.PUP by hand.")
+            return 1
+
+    if args.full:
+        print("== full: /etc/hosts pin ==")
+        hosts_path = next((path for path in HOSTS_FILES if shell.exists(path)), None)
+        if hosts_path is None:
+            print("  no writable hosts file found (ls /dev/nfs fails in this shell).")
+            print("  Load the kstuff app or etaHEN kfs, then re-run with --full.")
+            print("  The floor steps above already ran, so the console is still protected.")
+            return 1
+        print(f"  hosts file: {hosts_path}")
+        pin_hosts(shell, hosts_path, args.dry_run)
+    return 0
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Pin a jailbroken PS5 to its current firmware.")
-    ap.add_argument("--host", default="192.168.1.78", help="PS5 IP (default 192.168.1.78)")
-    ap.add_argument("--port", type=int, default=2323, help="shsrv telnet port (default 2323)")
-    mode = ap.add_mutually_exclusive_group()
+    parser = argparse.ArgumentParser(description="Pin a jailbroken PS5 to its current firmware.")
+    parser.add_argument("--host", required=True,
+                        help="PS5 IP address (Settings > Network > Connection Status)")
+    parser.add_argument("--port", type=int, default=2323, help="shsrv port (default 2323)")
+    mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--floor", action="store_true",
-                      help="safe mode: verify fw, delete PUP, verify /update clean")
+                      help="default: check firmware, delete any pending update")
     mode.add_argument("--full", action="store_true",
-                      help="strong mode: floor + pin /dev/nfs/etc/hosts (needs kfs mount)")
-    ap.add_argument("--dry-run", action="store_true", help="show changes without making them")
-    ap.add_argument("--strict", action="store_true",
-                    help="full mode: keep a corrupted PUP as a signature tripwire")
-    args = ap.parse_args()
-
-    if not (args.floor or args.full):
-        args.floor = True  # safe default
+                      help="floor + block the update servers in /etc/hosts (needs /dev/nfs)")
+    parser.add_argument("--dry-run", action="store_true", help="show changes without making them")
+    args = parser.parse_args()
 
     print("== ps5-fw-pin ==")
     print(f"target: {args.host}:{args.port}  mode: {'full' if args.full else 'floor'}"
@@ -181,54 +136,21 @@ def main():
 
     try:
         shell = PS5Shell(args.host, args.port)
-    except OSError as e:
-        print(f"cannot reach shsrv at {args.host}:{args.port}: {e}")
+    except OSError as error:
+        print(f"cannot reach shsrv at {args.host}:{args.port}: {error}")
         print("Is the jailbreak active and the shsrv payload loaded?")
         return 2
 
-    shell._drain(2)
+    with shell:
+        status = run_pin(shell, args)
+    if status != 0:
+        return status
 
-    # 1. firmware gate
-    fw = detect_firmware(shell)
-    print(f"firmware: {fw or 'UNKNOWN — verify manually (Settings > System)'}")
-    if fw:
-        major = fw.split(".")[0]
-        if major == "14":
-            print("STOP: firmware reads as 14.x. The jailbreak may not support it.")
-            print("Do NOT run the pin; consult the exploit's supported-firmware list.")
-            shell.close()
-            return 1
-    else:
-        print("note: could not read version in-shell. Proceeding — you confirmed the version.")
-
-    # 2. floor
-    print("== floor ==")
-    remove_pup(shell, args.dry_run)
-    if not args.dry_run:
-        verify_update_clean(shell)
-
-    # 3. full mode: hosts pin
-    if args.full:
-        print("== full: /etc/hosts pin ==")
-        hosts = find_hosts(shell)
-        if not hosts:
-            print("  /dev/nfs (or /etc/hosts) not found in this shell.")
-            print("  Load the kstuff app / etaHEN kfs first, then re-run with --full.")
-            print("  Floor mode still applies — the console is protected either way.")
-            shell.close()
-            return 1
-        print(f"  hosts file: {hosts}")
-        pin_hosts(shell, hosts, args.dry_run)
-        if args.strict and not args.dry_run:
-            print("  strict: leaving PUP as a signature tripwire (if any reappears,")
-            print("  it will fail verification on install attempt)")
-
-    shell.close()
     print()
     print("done. Reminders:")
-    print("  - Auto Downloads must be OFF (Settings > System > System Software and Updates)")
-    print("  - Update prompt: press X. Force-update boot screen: hold power 10s.")
-    print("  - To unpin: python3 ps5-fw-unpin.py")
+    print("  - Automatic Downloads must be Off (Settings > System > System Software and Updates)")
+    print("  - Update prompt: press X to dismiss. Stuck on an update screen: hold power 10s.")
+    print("  - To undo: python3 pin/ps5-fw-unpin.py --host <PS5 IP>")
     return 0
 
 

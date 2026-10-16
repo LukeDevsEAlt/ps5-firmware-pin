@@ -1,96 +1,82 @@
 # pin
 
-Keep a jailbroken PS5 on the firmware you want. No more "the PS5 needs an
-update before it can be turned on" at the worst possible moment.
+Stop a jailbroken PS5 from updating its firmware.
 
-## Why
+## Requirements
 
-Relapse (and the PS5 jailbreak scene in general) only works on specific
-firmware. The moment Sony ships a version the exploit doesn't support, the
-console will want to update — and a *forced* update screen can't be dismissed
-with a button press. If the console downloads the update and tries to install
-it, you lose the jailbreak.
+- Python 3.8+ on your computer (no packages needed)
+- The console jailbroken, with the **shsrv** payload loaded (port 2323)
+- The PS5's IP address: Settings > Network > Connection Status
 
-This tool makes sure the console **never has an update staged to install**,
-and (optionally) can't even **see** that one exists.
+## Usage
 
-## Quick start
-
-You need the jailbreak active with the **shsrv** payload loaded (the telnet
-shell, port 2323).
+Run these from the repo root. Replace `192.168.1.42` with your PS5's IP.
 
 ```bash
-# 1. The safe floor — verify fw, delete any pending update, confirm clean
-python3 pin/ps5-fw-pin.py --floor
+# Preview, changes nothing
+python3 pin/ps5-fw-pin.py --host 192.168.1.42 --dry-run
 
-# 2. See what it would do without changing anything
-python3 pin/ps5-fw-pin.py --floor --dry-run
+# Pin (default mode is --floor)
+python3 pin/ps5-fw-pin.py --host 192.168.1.42
 
-# 3. If you have /dev/nfs (kstuff app / etaHEN kfs), the strong pin
-python3 pin/ps5-fw-pin.py --full
-python3 pin/ps5-fw-pin.py --full --strict   # + the corrupted-PUP tripwire
+# Stronger pin, if `ls /dev/nfs` works in your shell
+python3 pin/ps5-fw-pin.py --host 192.168.1.42 --full
 
-# Reverse it when you're ready to update (day the exploit supports 14.x)
-python3 pin/ps5-fw-unpin.py
+# shsrv on a different port
+python3 pin/ps5-fw-pin.py --host 192.168.1.42 --port 2324
 ```
-
-Custom IP/port if yours differs:
-
-```bash
-python3 pin/ps5-fw-pin.py --host 192.168.1.50 --port 2323 --floor
-```
-
-No dependencies — stdlib only (Python 3.8+).
 
 ## The two modes
 
-### `--floor` (safe, default, always works)
+### `--floor` (default)
 
-- Checks the firmware version and **refuses to continue if it reads 14.x**
-  (check the exploit's supported list first)
-- Deletes any pending `PS5UPDATE.PUP` from `/update`
-- Verifies `/update` is clean
+1. Reads the firmware version. If it's 14.x, stops without changing anything.
+2. Deletes any downloaded update waiting in `/update/PS5UPDATE.PUP`.
+3. Checks `/update` is clean and fails loudly if it isn't.
 
-Pair it with **one console setting** (5 seconds, once):
+Pair it with one console setting, done once:
 
-> Settings → System → System Software and Updates →
-> **Automatic Downloads** → System Software and Apps → **Off**
+Settings > System > System Software and Updates > Automatic Downloads >
+System Software and Apps > **Off**
 
-That's the whole protection. No background download, nothing staged, and the
-only thing left is a prompt screen — press **X** to dismiss.
+With nothing downloaded and auto-downloads off, the console can't install an
+update on its own. The most you'll see is a prompt, which you dismiss with ✕.
 
-### `--full` (stronger, needs a kernel-filesystem mount)
+### `--full`: block the update servers
 
-Does everything `--floor` does, **plus** pins the real `/etc/hosts` so
-`update.playstation.com` resolves to `127.0.0.1` — the update checker
-connects to itself and finds nothing. No prompt at all.
+Does everything `--floor` does, then adds two lines to the console's real
+`/etc/hosts` so `update.playstation.com` and `dl.playstation.com` point at
+`127.0.0.1`. The update check can't reach Sony, so you don't get a prompt at
+all. The original is backed up next to it as `hosts.fwpin.bak` first.
 
-This needs `/dev/nfs` to exist in your jailbreak shell. That's created by the
-**kstuff app** or a modern **etaHEN** kfs mount — *not* by the old
-`kstuff-lite` payload (that's the FW 6–10 build). If `ls /dev/nfs` works in
-your shell, `--full` works. If not, `--floor` still fully protects you.
+This needs `/dev/nfs` in your jailbreak shell, which the **kstuff app** or a
+recent **etaHEN** (kfs) creates. The old `kstuff-lite` payload does not. If
+`ls /dev/nfs` fails, use `--floor`; it still protects you.
 
-`--strict` additionally leaves a **corrupted PUP** on disk, so if the console
-*ever* tries to install a 14.x, signature verification fails cleanly and it
-reboots to your current firmware.
+## Undo the pin
 
-## The one rule to remember
+When your exploit supports the newer firmware and you want to update:
 
-**The ✕ on the update screen is the only update button on the console.**
-Press ✕ to dismiss. Never press the "Update" / confirm button. If you're ever
-caught on a screen that won't let you back out, the physical **power button
-held for 10 seconds** always wins.
+```bash
+python3 pin/ps5-fw-unpin.py --host 192.168.1.42
+```
 
-## What this is NOT
+This restores `/etc/hosts` from the backup if `--full` was used. Then turn
+Automatic Downloads back on in Settings. `--floor` doesn't leave anything
+behind on the console, so the setting is the only thing to undo.
 
-- Not a brick-proof against *everything*. A power cut mid-real-install is
-  still a power cut mid-real-install. This prevents the console from
-  *reaching* that point.
-- Doesn't touch your games, saves, or the jailbreak itself.
+## What this doesn't do
+
+- It doesn't touch your games, saves, or the jailbreak.
+- It can't help once a real install has started. It stops the console from
+  getting that far.
+- It runs once. If the console downloads a new update later (for example
+  because auto-downloads got turned back on), run it again.
 
 ## Files
 
 | File | What it does |
 |---|---|
-| `ps5-fw-pin.py` | Pin: `--floor` (safe) or `--full` (hosts), `--dry-run`, `--strict`, fw gate |
-| `ps5-fw-unpin.py` | Restore: put `/etc/hosts` back, remove tripwire PUP |
+| `ps5-fw-pin.py` | Pin: `--floor` or `--full`, plus `--dry-run` |
+| `ps5-fw-unpin.py` | Undo `--full`: restore `/etc/hosts` from the backup |
+| `ps5shell.py` | Small client for the shsrv shell, used by both scripts |
