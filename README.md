@@ -1,52 +1,100 @@
 # ps5-firmware-pin
 
-Keep a jailbroken PS5 on the firmware you want — and get back if you end up
-somewhere else.
+Keep a jailbroken PS5 on the firmware you want, and get back to it if the
+console updated anyway.
 
-Tested on **fw 13.60.007** (Relapse jailbreak). The problem it solves: Relapse
-and the PS5 jailbreak scene only work on specific firmware. Sony ships a new
-version, the console wants it, a forced update screen can't be dismissed, and
-the jailbreak (and for some tools, the dumped games) is gone. These tools make
-that a non-event.
+Tested on **firmware 13.60.007** with the **Relapse** jailbreak.
 
-## The full lifecycle
+## Why
 
-| Stage | Tool | What it does |
+A PS5 jailbreak only works on specific firmware versions. When Sony ships a new
+one, the console downloads it in the background and eventually shows an update
+screen. Install it and the jailbreak is gone until someone ports the exploit.
+
+This repo has three small Python scripts for that situation:
+
+| You want to | Use | Details |
 |---|---|---|
-| **Stay put** | [`pin/`](pin/README.md) | Stop the console from downloading/staging updates so it can't force itself onto an unsupported version |
-| **Go back** | [`downgrade/`](downgrade/README.md) | Download, verify, and install a specific firmware over USB (e.g. 14.00 → 13.60), then re-jailbreak |
-| **Move on** | [`pin/ps5-fw-unpin.py`](pin/) | The day the exploit supports the next firmware, remove the pin and update normally |
+| Stop the console from updating | `pin/ps5-fw-pin.py` | [pin/README.md](pin/README.md) |
+| Go back to an older firmware (e.g. 14.00 to 13.60) | `downgrade/ps5-fw-downgrade.py` | [downgrade/README.md](downgrade/README.md) |
+| Allow updates again once the exploit supports them | `pin/ps5-fw-unpin.py` | [pin/README.md](pin/README.md#undo-the-pin) |
 
-Each folder is self-contained: one or two Python scripts (stdlib only, no
-dependencies) + its own README with the full step-by-step.
+## Before you start
 
-```
-ps5-firmware-pin/
-├── pin/
-│   ├── README.md
-│   ├── ps5-fw-pin.py        # --floor (safe) / --full (hosts) / --dry-run / --strict
-│   └── ps5-fw-unpin.py      # reverse of the pin
-└── downgrade/
-    ├── README.md
-    └── ps5-fw-downgrade.py  # PUP download + verification + USB install guide
-```
+You need:
 
-## TL;DR
+- **A computer with Python 3.8 or newer.** No packages to install. Check with
+  `python3 --version`. On Windows, use `py` instead of `python3`.
+- **This repo on that computer.** `git clone https://github.com/lvndry/ps5-firmware-pin`
+  or use **Code > Download ZIP** on GitHub and unzip it. Run every command
+  below from inside the `ps5-firmware-pin` folder.
+- **The PS5 and the computer on the same network.**
+- **Your PS5's IP address.** On the console: Settings > Network > Connection
+  Status > View Connection Status > IPv4 Address. It looks like `192.168.1.42`.
+
+The pin scripts also need the console **jailbroken right now, with the shsrv
+payload loaded**. shsrv is the shell the scripts talk to, on port 2323. The
+downgrade script runs on your computer only and does not need the jailbreak.
+
+## Stop the console from updating
+
+1. Jailbreak the console and load the shsrv payload.
+2. On the computer, preview what the script will do (it changes nothing):
+
+   ```bash
+   python3 pin/ps5-fw-pin.py --host 192.168.1.42 --dry-run
+   ```
+
+3. Run it for real:
+
+   ```bash
+   python3 pin/ps5-fw-pin.py --host 192.168.1.42
+   ```
+
+   It reads the firmware version, deletes any update the console already
+   downloaded, and checks nothing is left waiting to install. It stops without
+   changing anything if the console is on 14.x.
+
+4. On the console, turn off automatic downloads (once):
+   Settings > System > System Software and Updates > Automatic Downloads >
+   System Software and Apps > **Off**.
+
+That's it. If an update prompt still appears, press **✕** to dismiss it.
+
+Want the console to stop seeing updates at all? See
+[`--full` mode](pin/README.md#--full-block-the-update-servers).
+
+## The one rule
+
+**Never press confirm on an update screen.** Press ✕ to dismiss it. If you are
+stuck on a screen that won't let you back out, hold the console's power button
+for 10 seconds to turn it off.
+
+## Already updated? Go back
+
+If the console is on a firmware the jailbreak doesn't support, you can install
+an older one from a USB stick:
 
 ```bash
-# Protect a jailbroken console (needs shsrv payload loaded, port 2323)
-python3 pin/ps5-fw-pin.py --floor
-
-# One console setting, done once:
-#   Settings > System > System Software and Updates >
-#   Automatic Downloads > System Software and Apps > OFF
-
-# If you ended up on 14.x, come home to 13.60:
 python3 downgrade/ps5-fw-downgrade.py 13.60.007 --region europe
-# → USB stick PS5/UPDATE/PS5UPDATE.PUP → Install Update from USB Drive
-# → re-jailbreak → done (games and saves survive)
 ```
 
-The one rule that matters: **the ✕ on the update screen is the only update
-button on the console.** Never press confirm on it; if you're ever trapped on
-a full-screen update, hold the physical power button for 10 seconds.
+This downloads the official firmware file (2 to 7 GB) and checks it's real.
+Then copy it to a USB stick and install it from the console. The full
+walkthrough is in [downgrade/README.md](downgrade/README.md). Your games and
+saves stay; the jailbreak has to be run again afterwards.
+
+## Troubleshooting
+
+| You see | What it means |
+|---|---|
+| `error: the following arguments are required: --host` | Add `--host` followed by your PS5's IP address |
+| `cannot reach shsrv at ...` | The console isn't jailbroken right now, shsrv isn't loaded, or the IP is wrong |
+| `STOP: this console is on 14.x` | The console already updated. See [Already updated? Go back](#already-updated-go-back) |
+| `firmware: unknown` | The script couldn't read the version. Check it in Settings > System > System Software before trusting the result |
+| `python3: command not found` | Install Python from python.org, or use `py` on Windows |
+
+## Disclaimer
+
+Use at your own risk. Modifying console firmware and running homebrew may void
+your warranty and break Sony's terms of service. Not affiliated with Sony.
