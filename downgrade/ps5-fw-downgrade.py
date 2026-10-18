@@ -36,6 +36,7 @@ import time
 import urllib.request
 
 MIN_PUP_BYTES = 512 * 1024 * 1024
+PUP_MAGIC = b"SLB2"
 
 REJAILBREAK_CHECKLIST = """
 After the console reboots into the new firmware, the jailbreak is GONE
@@ -64,9 +65,8 @@ system software", that's normal for a downgrade and the option still
 installs it (keyset 0 is active as of Oct 2026).
 """
 
-
 def verify_pup(path: str) -> tuple[bool, str]:
-    """Catch the usual bad downloads (stubs, HTML error pages). Returns (ok, reason)."""
+    """Catch bad downloads (stubs, HTML error pages, truncated files). Returns (ok, reason)."""
     if not os.path.isfile(path):
         return False, f"no such file: {path}"
     size = os.path.getsize(path)
@@ -74,9 +74,12 @@ def verify_pup(path: str) -> tuple[bool, str]:
         return False, (f"only {size:,} bytes, a real PUP is about 1 GB "
                        f"(this looks like a stub or an error page)")
     with open(path, "rb") as pup_file:
-        head = pup_file.read(64).lstrip().lower()
-    if head.startswith((b"http", b"<!do", b"<htm")):
-        return False, "file starts with HTML: the server returned a web page, not the PUP"
+        head = pup_file.read(64)
+    if head[:4] != PUP_MAGIC:
+        if head.lstrip().lower().startswith((b"http", b"<!do", b"<htm")):
+            return False, "file starts with HTML: the server returned a web page, not the PUP"
+        return False, ("missing PUP header (expected magic "
+                       f"{PUP_MAGIC.decode()!r}): the file is truncated, corrupted, or not a PUP")
     return True, f"{size:,} bytes"
 
 
